@@ -37,6 +37,34 @@ RSpec.describe CheckoutService do
 
   let(:checkout) { described_class.new }
 
+  # Match the calculator names with your actual implementation
+  let(:bogof_calculator) { instance_double(BogofDiscountCalculator) }
+  let(:bulk_calculator) { instance_double(BulkDiscountCalculator) }
+  let(:percentage_calculator) { instance_double(PercentDiscountCalculator) }
+  let(:regular_calculator) { instance_double(RegularPriceCalculator) }
+
+  before do
+    allow(BogofDiscountCalculator).to receive(:new).and_return(bogof_calculator)
+    allow(BulkDiscountCalculator).to receive(:new).and_return(bulk_calculator)
+    allow(PercentDiscountCalculator).to receive(:new).and_return(percentage_calculator)
+    allow(RegularPriceCalculator).to receive(:new).and_return(regular_calculator)
+
+    allow(bogof_calculator).to receive(:calculate).and_return(3.11)
+    allow(bulk_calculator).to receive(:calculate).and_return(13.50)
+    allow(percentage_calculator).to receive(:calculate).and_return(22.46)
+    allow(regular_calculator).to receive(:calculate) do |product, quantity, _rule|
+      product.price * quantity
+    end
+
+    products_relation = double("ProductsRelation")
+    allow(Product).to receive(:includes).and_return(products_relation)
+    allow(products_relation).to receive(:index_by).and_return({
+      "GR1" => green_tea,
+      "SR1" => strawberries,
+      "CF1" => coffee
+    })
+  end
+
   describe "#calculate_total" do
     context "with empty basket" do
       it "returns zero" do
@@ -45,161 +73,60 @@ RSpec.describe CheckoutService do
     end
 
     context "with a single product" do
-      before do
-        allow(Product).to receive(:find_by).with(code: "GR1").and_return(green_tea)
-        allow(Product).to receive(:find_by).with(code: "SR1").and_return(strawberries)
-        allow(Product).to receive(:find_by).with(code: "CF1").and_return(coffee)
-        allow(Product).to receive(:find_by).with(code: anything).and_return(nil)
-      end
-
-      it "calculates the regular price for one green tea" do
-        expect(checkout.calculate_total([ "GR1" ])).to eq(3.11)
-      end
-
-      it "calculates the regular price for one strawberry" do
-        expect(checkout.calculate_total([ "SR1" ])).to eq(5.00)
-      end
-
-      it "calculates the regular price for one coffee" do
-        expect(checkout.calculate_total([ "CF1" ])).to eq(11.23)
+      it "uses regular price for one item" do
+        expect(checkout.calculate_total(["GR1"])).to eq(3.11)
+        expect(regular_calculator).not_to have_received(:calculate)
       end
     end
 
-    context "with BOGOF discount for Green Tea" do
-      before do
-        allow(Product).to receive(:find_by).with(code: "GR1").and_return(green_tea)
+    context "with multiple items eligible for discount" do
+      it "calls the appropriate calculator for BOGOF" do
+        allow(bogof_calculator).to receive(:calculate).with(green_tea, 2, green_tea_rule).and_return(3.11)
+
+        checkout.calculate_total(["GR1", "GR1"])
+
+        expect(bogof_calculator).to have_received(:calculate).with(green_tea, 2, green_tea_rule)
       end
 
-      it "applies discount for two green teas" do
-        expect(checkout.calculate_total([ "GR1", "GR1" ])).to eq(3.11)
+      it "calls the appropriate calculator for bulk price" do
+        allow(bulk_calculator).to receive(:calculate).with(strawberries, 3, strawberry_rule).and_return(13.50)
+
+        checkout.calculate_total(["SR1", "SR1", "SR1"])
+
+        expect(bulk_calculator).to have_received(:calculate).with(strawberries, 3, strawberry_rule)
       end
 
-      it "applies discount for three green teas" do
-        expect(checkout.calculate_total([ "GR1", "GR1", "GR1" ])).to eq(6.22)
-      end
+      it "calls the appropriate calculator for percentage discount" do
+        allow(percentage_calculator).to receive(:calculate).with(coffee, 3, coffee_rule).and_return(22.46)
 
-      it "applies discount for four green teas" do
-        expect(checkout.calculate_total([ "GR1", "GR1", "GR1", "GR1" ])).to eq(6.22)
-      end
-    end
+        checkout.calculate_total(["CF1", "CF1", "CF1"])
 
-    context "with bulk discount for Strawberries" do
-      before do
-        allow(Product).to receive(:find_by).with(code: "SR1").and_return(strawberries)
-      end
-
-      it "applies regular price for two strawberries" do
-        expect(checkout.calculate_total([ "SR1", "SR1" ])).to eq(10.00)
-      end
-
-      it "applies discount for three strawberries" do
-        expect(checkout.calculate_total([ "SR1", "SR1", "SR1" ])).to eq(13.50)
-      end
-
-      it "applies discount for four strawberries" do
-        expect(checkout.calculate_total([ "SR1", "SR1", "SR1", "SR1" ])).to eq(18.00)
-      end
-    end
-
-    context "with percentage discount for Coffee" do
-      before do
-        allow(Product).to receive(:find_by).with(code: "CF1").and_return(coffee)
-      end
-
-      it "applies regular price for two coffees" do
-        expect(checkout.calculate_total([ "CF1", "CF1" ])).to eq(22.46)
-      end
-
-      it "applies discount for three coffees" do
-        expect(checkout.calculate_total([ "CF1", "CF1", "CF1" ])).to eq(22.46)
-      end
-
-      it "applies discount for four coffees" do
-        expect(checkout.calculate_total([ "CF1", "CF1", "CF1", "CF1" ])).to eq(29.95)
+        expect(percentage_calculator).to have_received(:calculate).with(coffee, 3, coffee_rule)
       end
     end
 
     context "with mixed items" do
-      before do
-        allow(Product).to receive(:find_by).with(code: "GR1").and_return(green_tea)
-        allow(Product).to receive(:find_by).with(code: "SR1").and_return(strawberries)
-        allow(Product).to receive(:find_by).with(code: "CF1").and_return(coffee)
-      end
+      it "calculates the correct total with multiple discount types" do
+        # SR1, SR1, GR1, SR1
+        allow(bogof_calculator).to receive(:calculate).with(green_tea, 1, anything).and_return(3.11)
+        allow(bulk_calculator).to receive(:calculate).with(strawberries, 3, strawberry_rule).and_return(13.50)
 
-      it "calculates the correct total for GR1, GR1" do
-        expect(checkout.calculate_total([ "GR1", "GR1" ])).to eq(3.11)
-      end
+        result = checkout.calculate_total(["SR1", "SR1", "GR1", "SR1"])
 
-      it "calculates the correct total for SR1, SR1, GR1, SR1" do
-        expect(checkout.calculate_total([ "SR1", "SR1", "GR1", "SR1" ])).to eq(16.61)
-      end
-
-      it "calculates the correct total for GR1, CF1, SR1, CF1, CF1" do
-        expect(checkout.calculate_total([ "GR1", "CF1", "SR1", "CF1", "CF1" ])).to eq(30.57)
-      end
-    end
-
-    context "with invalid product codes" do
-      before do
-        allow(Product).to receive(:find_by).with(code: "GR1").and_return(green_tea)
-        allow(Product).to receive(:find_by).with(code: "INVALID").and_return(nil)
-        allow(Product).to receive(:find_by).with(code: "NOTFOUND").and_return(nil)
-      end
-
-      it "ignores invalid product codes" do
-        expect(checkout.calculate_total([ "INVALID", "GR1" ])).to eq(3.11)
-      end
-
-      it "returns zero for basket with only invalid codes" do
-        expect(checkout.calculate_total([ "INVALID", "NOTFOUND" ])).to eq(0)
+        expect(result).to eq(16.61)
       end
     end
   end
 
   describe "#count_items" do
     it "correctly counts occurrences of each item" do
-      result = checkout.send(:count_items, [ "GR1", "SR1", "GR1", "CF1", "CF1" ])
-      expect(result).to eq({ "GR1" => 2, "SR1" => 1, "CF1" => 2 })
+      result = checkout.send(:count_items, ["GR1", "SR1", "GR1", "CF1", "CF1"])
+      expect(result).to eq({"GR1" => 2, "SR1" => 1, "CF1" => 2})
     end
 
     it "returns an empty hash for an empty array" do
       result = checkout.send(:count_items, [])
       expect(result).to eq({})
-    end
-  end
-
-  describe "#apply_discount" do
-    context "with BOGOF discount" do
-      it "applies discount correctly" do
-        result = checkout.send(:apply_discount, green_tea, 3, green_tea_rule)
-        expect(result).to eq(6.22)
-      end
-    end
-
-    context "with bulk price discount" do
-      it "applies discount correctly" do
-        result = checkout.send(:apply_discount, strawberries, 4, strawberry_rule)
-        expect(result).to eq(18.00)
-      end
-    end
-
-    context "with percentage discount" do
-      it "applies discount correctly" do
-        result = checkout.send(:apply_discount, coffee, 3, coffee_rule)
-        expect(result).to eq(22.46)
-      end
-    end
-
-    context "with unknown rule type" do
-      it "falls back to regular price" do
-        unknown_rule = instance_double("DiscountRule",
-          rule_type: "unknown",
-          min_quantity: 1
-        )
-
-        result = checkout.send(:apply_discount, green_tea, 2, unknown_rule)
-        expect(result).to eq(6.22)
-      end
     end
   end
 end

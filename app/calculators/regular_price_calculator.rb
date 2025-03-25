@@ -1,0 +1,2 @@
+  class RegularPriceCalculator < DiscountCalculator
+  end
