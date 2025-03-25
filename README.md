@@ -48,7 +48,7 @@ Represents pricing rules that can be applied to products:
 ### Setup Steps
 1. Clone the repository
    ```bash
-   git clone https://github.com/yourusername/shopping-cart-app.git
+   git clone https://github.com/playwaugh/shopping-cart-app.git
    cd shopping-cart-app
    ```
 
