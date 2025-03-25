@@ -109,9 +109,9 @@ bundle exec rspec
 ### Using a Service Object for Checkout Logic
 The checkout logic is encapsulated in a dedicated service object (CheckoutService) to:
 
-Separate business logic from controllers
-Make the code more testable
-Allow for easier extension with new discount types
+- Separate business logic from controllers
+- Make the code more testable
+- Allow for easier extension with new discount types
 
 ### Session-Based Cart
 The cart is stored in the session rather than the database to:
